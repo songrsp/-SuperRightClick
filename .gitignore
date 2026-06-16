@@ -9,6 +9,9 @@ DerivedData/
 *.dmg
 *.zip
 
+# 本机签名配置
+Local.xcconfig
+
 # macOS
 .DS_Store
 

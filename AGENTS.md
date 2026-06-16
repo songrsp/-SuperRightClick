@@ -17,7 +17,7 @@
 
 ```bash
 brew install xcodegen          # 一次即可
-# 改 project.yml 里的 DEVELOPMENT_TEAM 为真实 10 位 Team ID
+# 复制 Local.xcconfig.example 为 Local.xcconfig，并填真实 10 位 Team ID
 ./scripts/bootstrap.sh         # = xcodegen generate
 open SuperRightClick.xcodeproj # Xcode ⌘R
 ```

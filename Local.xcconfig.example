@@ -1,0 +1,3 @@
+// Copy this file to Local.xcconfig and fill your own 10-character Apple Team ID.
+// Find it at https://developer.apple.com/account under Membership.
+DEVELOPMENT_TEAM =
