@@ -96,10 +96,10 @@ enum MenuBuilder {
             head.submenu = m
             dest.addItem(head)
         }
-        // 防止出现连续/开头的分隔线
-        func sep() {
-            if let last = dest.items.last, !last.isSeparatorItem { dest.addItem(.separator()) }
-        }
+
+        // 排版说明：Finder Sync 注入的上下文菜单里,第三方 .separator() 不会渲染成
+        // 原生那种细分隔线,而是变成一整截突兀的空白。用户选择「紧凑平铺」,所以这里
+        // 六组功能直接连成一条连续列表,不插任何分隔符。
 
         // —— 打开方式（含动态列出可打开选中文件的 App）——
         if Pref.openWith {
@@ -109,14 +109,12 @@ enum MenuBuilder {
             ]
             let apps = appsThatOpen(selected)
             if !apps.isEmpty {
-                openItems.append(.separator())
                 for appURL in apps {
                     openItems.append(item(appURL.deletingPathExtension().lastPathComponent,
                                           .openWith, arg: appURL.path))
                 }
             }
             addSubmenu("打开方式", openItems)
-            sep()
         }
 
         // —— 复制信息 ——
@@ -124,7 +122,6 @@ enum MenuBuilder {
             dest.addItem(item("复制路径", .copyPath))
             dest.addItem(item("复制文件名", .copyName))
             dest.addItem(item("复制所在目录", .copyDirPath))
-            sep()
         }
 
         // —— 新建 ——
@@ -134,7 +131,6 @@ enum MenuBuilder {
                 item("Markdown (.md)", .newFileMarkdown),
                 item("文件夹", .newFolder),
             ])
-            sep()
         }
 
         // —— 文件操作（需选中对象）——
@@ -145,14 +141,12 @@ enum MenuBuilder {
             if hasArchive { dest.addItem(item("解压到此处", .decompress)) }
             if selected.count > 1 { dest.addItem(item("批量重命名…", .batchRename)) }
             dest.addItem(item("移到废纸篓", .moveToTrash))
-            sep()
         }
 
         // —— 开发者（哈希）——
         if Pref.developer && hasSelection {
             dest.addItem(item("复制 SHA256", .copyHashSHA256))
             dest.addItem(item("复制 MD5", .copyHashMD5))
-            sep()
         }
 
         // —— 仿 Windows 常驻项 ——
@@ -164,7 +158,6 @@ enum MenuBuilder {
 
         // —— 卸载（仅选中 .app 时出现）——
         if Pref.uninstall && hasApp {
-            sep()
             dest.addItem(item("彻底卸载此应用并清理残余…", .uninstallApp))
         }
 
