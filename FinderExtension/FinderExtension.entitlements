@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App 扩展强制要求开启沙盒，这里无法关闭。
+         正因如此，重操作（删除/卸载/跑 shell）都交给非沙盒的主程序去做。 -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- 与主程序共享的 App Group（指令信箱） -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.team.superrightclick</string>
+    </array>
+
+    <!-- 允许读写用户在 Finder 中选中的文件（就地完成剪贴板类操作） -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

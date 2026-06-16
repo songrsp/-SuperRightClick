@@ -1,0 +1,58 @@
+name: SuperRightClick
+options:
+  bundleIdPrefix: com.team
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+# ---- 全局编译设置 ----
+# DEVELOPMENT_TEAM 必须填成你自己的 Apple 开发者 Team ID（10 位），
+# 否则签名 / App Group / Finder 扩展都无法工作。
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: "PF57AK9AXM"      # ← 改成你的 Team ID
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_EMIT_LOC_STRINGS: YES
+
+targets:
+  # ============ 容器主程序（非沙盒，负责真正执行重操作） ============
+  SuperRightClick:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.team.superrightclick
+        PRODUCT_NAME: SuperRightClick
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+    dependencies:
+      - sdk: FinderSync.framework
+      - target: FinderExtension
+        embed: true   # 把 .appex 嵌入到 App 的 Contents/PlugIns 内
+
+  # ============ Finder Sync 扩展（沙盒，只负责出菜单 + 投递指令） ============
+  FinderExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: FinderExtension
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.team.superrightclick.FinderExtension
+        PRODUCT_NAME: FinderExtension
+        INFOPLIST_FILE: FinderExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: FinderExtension/FinderExtension.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+    dependencies:
+      - sdk: FinderSync.framework
