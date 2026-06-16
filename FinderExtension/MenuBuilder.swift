@@ -133,14 +133,27 @@ enum MenuBuilder {
             ])
         }
 
-        // —— 文件操作（需选中对象）——
-        if Pref.fileOps && hasSelection {
-            dest.addItem(item("复制到…", .copyToFolder))
-            dest.addItem(item("移动到…", .moveToFolder))
-            dest.addItem(item("压缩为 ZIP", .compress))
-            if hasArchive { dest.addItem(item("解压到此处", .decompress)) }
-            if selected.count > 1 { dest.addItem(item("批量重命名…", .batchRename)) }
-            dest.addItem(item("移到废纸篓", .moveToTrash))
+        // —— 文件操作 ——
+        if Pref.fileOps {
+            // Windows 式 剪切 / 复制（需选中对象）
+            if hasSelection {
+                dest.addItem(item("剪切", .cutFiles))
+                dest.addItem(item("复制文件", .copyFiles))
+            }
+            // 粘贴：只在文件剪贴板有内容时出现；空白处右键(无选中)也能粘贴
+            let clipCount = FileClipboard.count
+            if clipCount > 0 {
+                dest.addItem(item("粘贴 \(clipCount) 项到此处", .pasteHere))
+            }
+            // 其余文件操作（需选中对象）
+            if hasSelection {
+                dest.addItem(item("复制到…", .copyToFolder))
+                dest.addItem(item("移动到…", .moveToFolder))
+                dest.addItem(item("压缩为 ZIP", .compress))
+                if hasArchive { dest.addItem(item("解压到此处", .decompress)) }
+                if selected.count > 1 { dest.addItem(item("批量重命名…", .batchRename)) }
+                dest.addItem(item("移到废纸篓", .moveToTrash))
+            }
         }
 
         // —— 开发者（哈希）——

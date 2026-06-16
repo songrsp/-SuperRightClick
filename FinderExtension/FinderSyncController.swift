@@ -72,6 +72,18 @@ final class FinderSyncController: FIFinderSync {
             let dirs = selected.map { $0.deletingLastPathComponent().path }
             Clipboard.copy(dirs.isEmpty ? (containerPath ?? "") : dirs.joined(separator: "\n"))
             return
+
+        // 剪切 / 复制文件：只是把选中项记进 App Group 的文件剪贴板，扩展内即时完成，
+        // 不唤主程序。真正的搬运发生在「粘贴」时。
+        case .cutFiles:
+            FileClipboard.put(mode: .cut, paths: paths)
+            Log.info("剪切 \(paths.count) 项")
+            return
+        case .copyFiles:
+            FileClipboard.put(mode: .copy, paths: paths)
+            Log.info("复制文件 \(paths.count) 项")
+            return
+
         default:
             break
         }
@@ -96,6 +108,14 @@ enum Clipboard {
 /// 唤起容器主程序，让它去处理信箱里的指令。
 enum AppLauncher {
     static func wakeContainerApp() {
+        // 主程序已在后台运行时，不要再次 openApplication。
+        // 否则 SwiftUI 的设置窗口会被反复拉出来；信箱轮询本身会处理刚写入的命令。
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: AppConfig.appBundleID).isEmpty {
+            Log.debugFile("container app already running; skip openApplication")
+            return
+        }
+        BackgroundWakeMarker.mark()
+
         // 扩展 .appex 位于  XXX.app/Contents/PlugIns/FinderExtension.appex
         // 向上三级即为容器 App。
         let appURL = Bundle.main.bundleURL          // .../FinderExtension.appex

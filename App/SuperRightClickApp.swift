@@ -18,10 +18,15 @@ struct SuperRightClickApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var timer: Timer?
+    private var launchedForBackgroundCommand = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("主程序启动")
+        launchedForBackgroundCommand = BackgroundWakeMarker.consume()
         processMailbox()
+        if launchedForBackgroundCommand {
+            closeSettingsWindowsSoon()
+        }
         // 0.5s 轮询信箱。也可改用 FSEvents 监听目录，这里用定时器最直观、最稳。
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -32,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         processMailbox()   // 被扩展唤起到前台时立即处理一次
+        if launchedForBackgroundCommand {
+            closeSettingsWindowsSoon()
+        }
     }
 
     /// 处理 superrightclick://run?action=...&paths=<base64 json> 这类备用调用
@@ -50,6 +58,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CommandExecutor.execute(cmd)
             Mailbox.remove(file)
             Log.info("信箱完成并删除 \(file.lastPathComponent)")
+        }
+    }
+
+    @MainActor
+    private func closeSettingsWindowsSoon() {
+        DispatchQueue.main.async {
+            NSApp.windows
+                .filter { $0.title == "超级右键" }
+                .forEach { $0.close() }
+            NSApp.hide(nil)
         }
     }
 }

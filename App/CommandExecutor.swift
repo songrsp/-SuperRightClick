@@ -29,6 +29,12 @@ enum CommandExecutor {
         case .moveToFolder:  pickFolderThen(urls) { move($0, to: $1) }
         case .batchRename:   BatchRenameWindow.show(for: urls)
 
+        // —— Windows 式 剪切/复制/粘贴 ——
+        // 剪切/复制理论上扩展已写好剪贴板，这里兜底（万一走到主程序）。
+        case .cutFiles:   FileClipboard.put(mode: .cut,  paths: command.paths)
+        case .copyFiles:  FileClipboard.put(mode: .copy, paths: command.paths)
+        case .pasteHere:  paste(into: containerURL ?? urls.first)
+
         // —— 开发者 ——
         case .openInTerminal: openTerminal(at: containerURL ?? urls.first?.deletingLastPathComponent())
         case .openInVSCode:   openVSCode(urls.isEmpty ? [containerURL].compactMap { $0 } : urls)
@@ -111,6 +117,45 @@ enum CommandExecutor {
             let target = dest.appendingPathComponent(u.lastPathComponent)
             try? FileManager.default.moveItem(at: u, to: target)
         }
+    }
+
+    /// 粘贴：按文件剪贴板把源文件 move(剪切) / copy(复制) 进目标文件夹。
+    /// 同名冲突一律自动加后缀（sample.txt → sample 2.txt），绝不覆盖。
+    private static func paste(into dir: URL?) {
+        guard let dir = directory(of: dir) else {
+            Log.error("粘贴失败：目标文件夹无效")
+            return
+        }
+        guard let clip = FileClipboard.get(), !clip.paths.isEmpty else {
+            Log.info("粘贴：剪贴板为空，忽略")
+            return
+        }
+
+        var done = 0, skipped = 0
+        for p in clip.paths {
+            let src = URL(fileURLWithPath: p)
+            guard FileManager.default.fileExists(atPath: src.path) else {
+                skipped += 1                       // 源已不存在（被移走/删除）
+                continue
+            }
+            let target = uniqueURL(dir: dir,
+                                   base: src.deletingPathExtension().lastPathComponent,
+                                   ext: src.pathExtension.isEmpty ? nil : src.pathExtension)
+            do {
+                switch clip.mode {
+                case .cut:  try FileManager.default.moveItem(at: src, to: target)
+                case .copy: try FileManager.default.copyItem(at: src, to: target)
+                }
+                done += 1
+            } catch {
+                skipped += 1
+                Log.error("粘贴失败 \(src.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        // 剪切：成功搬完后清空剪贴板；复制：保留，可连续粘贴到多个位置。
+        if clip.mode == .cut { FileClipboard.clear() }
+        Log.info("粘贴(\(clip.mode.rawValue))完成 \(done) 项，跳过 \(skipped) → \(dir.path)")
     }
 
     // MARK: - 开发者
