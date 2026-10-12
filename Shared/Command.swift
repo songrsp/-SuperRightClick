@@ -14,6 +14,7 @@ enum ActionID: String, Codable, CaseIterable {
     case newFileTxt        // 在此新建 .txt
     case newFileMarkdown   // 在此新建 .md
     case newFolder         // 在此新建文件夹
+    case newFileTemplate   // 按模板 id 新建（id 放在 Command.arg）
     case moveToTrash       // 移到废纸篓
     case compress          // 压缩为 zip
     case decompress        // 解压

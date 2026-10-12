@@ -46,13 +46,14 @@ enum MenuRegistry {
 /// `MenuBuilder` 统一转换为 `NSMenuItem`。这样偏好开关只影响模型层，
 /// 不会把 UI 配置字段混进 Shared/Command.swift 的动作协议。
 private indirect enum MenuModel {
-    case leaf(title: String, action: ActionID, arg: String?, enabled: Bool)
+    case leaf(title: String, action: ActionID, arg: String?, iconName: String?, enabled: Bool)
     case group(title: String, children: [MenuModel], enabled: Bool)
     case section(children: [MenuModel], enabled: Bool)
 
     static func item(title: String, action: ActionID, arg: String? = nil,
+                    iconName: String? = nil,
                     enabled: Bool = true) -> MenuModel {
-        .leaf(title: title, action: action, arg: arg, enabled: enabled)
+        .leaf(title: title, action: action, arg: arg, iconName: iconName, enabled: enabled)
     }
 
     static func submenu(title: String, children: [MenuModel],
@@ -66,7 +67,7 @@ private indirect enum MenuModel {
 
     var isEnabled: Bool {
         switch self {
-        case let .leaf(_, _, _, enabled), let .group(_, _, enabled),
+        case let .leaf(_, _, _, _, enabled), let .group(_, _, enabled),
              let .section(_, enabled):
             return enabled
         }
@@ -155,11 +156,7 @@ enum MenuBuilder {
                 .item(title: "复制文件名", action: .copyName),
                 .item(title: "复制所在目录", action: .copyDirPath),
             ], enabled: Pref.copyInfo && hasSelection),
-            .submenu(title: "新建", children: [
-                .item(title: "文本文件 (.txt)", action: .newFileTxt),
-                .item(title: "Markdown (.md)", action: .newFileMarkdown),
-                .item(title: "文件夹", action: .newFolder),
-            ], enabled: Pref.newItems),
+            .submenu(title: "新建", children: newFileModels(), enabled: Pref.newItems),
             .flat(fileItems, enabled: Pref.fileOps),
             .flat([
                 .item(title: "复制 SHA256", action: .copyHashSHA256),
@@ -179,9 +176,12 @@ enum MenuBuilder {
                                target: AnyObject, action: Selector) {
         for model in models where model.isEnabled {
             switch model {
-            case let .leaf(title, id, arg, _):
+            case let .leaf(title, id, arg, iconName, _):
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = target
+                if let iconName = iconName {
+                    item.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+                }
                 let tag = MenuRegistry.register(MenuPayload(action: id, arg: arg))
                 item.tag = tag
                 var dict = ["action": id.rawValue]
@@ -202,6 +202,24 @@ enum MenuBuilder {
             case let .section(children, _):
                 render(children, into: menu, target: target, action: action)
             }
+        }
+    }
+
+    private static func newFileModels() -> [MenuModel] {
+        let templates = NewFileTemplateStore.enabled
+        let grouped = Dictionary(grouping: templates, by: { $0.menuGroup })
+        return grouped.keys.sorted().flatMap { group in
+            let entries = (grouped[group] ?? []).map {
+                MenuModel.item(title: $0.displayName,
+                               action: .newFileTemplate,
+                               arg: $0.id,
+                               iconName: $0.iconName)
+            }
+            // The built-in group stays flat inside "新建". Custom categories
+            // become nested submenus while retaining their model metadata.
+            return group == "新建"
+                ? entries
+                : [MenuModel.submenu(title: group, children: entries)]
         }
     }
 

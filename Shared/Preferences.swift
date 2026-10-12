@@ -17,6 +17,8 @@ enum Pref {
         static let groupWindows    = "grp.windows"     // 仿 Windows
         static let groupUninstall  = "grp.uninstall"   // 卸载
         static let useSubmenu      = "ui.useSubmenu"   // 收进 ⚡️ 超级右键 子菜单 vs 平铺
+        static let newFileAutoOpen = "newFile.autoOpen"    // 新建后用默认 App 打开
+        static let newFileAutoReveal = "newFile.autoReveal" // 新建后在 Finder 中选中
     }
 
     /// 读 bool，未设置过返回默认值（分组默认开，子菜单默认关=平铺）。
@@ -33,4 +35,6 @@ enum Pref {
     static var windows:   Bool { bool(Key.groupWindows,   default: true) }
     static var uninstall: Bool { bool(Key.groupUninstall, default: true) }
     static var useSubmenu: Bool { bool(Key.useSubmenu,    default: false) }
+    static var newFileAutoOpen: Bool { bool(Key.newFileAutoOpen, default: false) }
+    static var newFileAutoReveal: Bool { bool(Key.newFileAutoReveal, default: true) }
 }

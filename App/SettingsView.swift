@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage(Pref.Key.groupWindows,   store: Pref.store) private var grpWindows   = true
     @AppStorage(Pref.Key.groupUninstall, store: Pref.store) private var grpUninstall = true
     @AppStorage(Pref.Key.useSubmenu,     store: Pref.store) private var useSubmenu   = false
+    @AppStorage(Pref.Key.newFileAutoOpen, store: Pref.store) private var newFileAutoOpen = false
+    @AppStorage(Pref.Key.newFileAutoReveal, store: Pref.store) private var newFileAutoReveal = true
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -95,6 +97,8 @@ struct SettingsView: View {
             Toggle("开发者（SHA256 / MD5）", isOn: $grpDeveloper)
             Toggle("仿 Windows（隐藏文件 / 刷新 / 属性）", isOn: $grpWindows)
             Toggle("彻底卸载 .app", isOn: $grpUninstall)
+            Toggle("新建后用默认 App 打开", isOn: $newFileAutoOpen)
+            Toggle("新建后在 Finder 中选中", isOn: $newFileAutoReveal)
             Divider().padding(.vertical, 4)
             Toggle("收进「⚡️ 超级右键」子菜单（关=平铺到 Finder 菜单）", isOn: $useSubmenu)
         }

@@ -18,9 +18,18 @@ enum CommandExecutor {
         case .copyDirPath: Pasteboard.set(urls.isEmpty ? (command.containerPath ?? "") : urls.map { $0.deletingLastPathComponent().path }.joined(separator: "\n"))
 
         // —— 新建 ——
-        case .newFileTxt:      newFile(ext: "txt", in: containerURL ?? urls.first)
-        case .newFileMarkdown: newFile(ext: "md",  in: containerURL ?? urls.first)
-        case .newFolder:       newFolder(in: containerURL ?? urls.first)
+        case .newFileTxt:
+            NewFileManager.create(templateID: NewFileTemplateID.text, in: containerURL ?? urls.first)
+        case .newFileMarkdown:
+            NewFileManager.create(templateID: NewFileTemplateID.markdown, in: containerURL ?? urls.first)
+        case .newFolder:
+            NewFileManager.create(templateID: NewFileTemplateID.folder, in: containerURL ?? urls.first)
+        case .newFileTemplate:
+            guard let templateID = command.arg else {
+                Alerts.warn("无法新建", "缺少模板 id。")
+                return
+            }
+            NewFileManager.create(templateID: templateID, in: containerURL ?? urls.first)
 
         // —— 文件管理 ——
         case .moveToTrash:   trash(urls)
@@ -54,23 +63,6 @@ enum CommandExecutor {
                 UninstallManager.shared.startUninstall(appURL: app)
             }
         }
-    }
-
-    // MARK: - 新建
-
-    private static func newFile(ext: String, in dir: URL?) {
-        guard let dir = directory(of: dir) else { return }
-        let url = uniqueURL(dir: dir, base: "未命名", ext: ext)
-        let ok = FileManager.default.createFile(atPath: url.path, contents: Data())
-        Log.info("新建文件 \(url.path) \(ok ? "成功" : "失败")")
-        revealInFinder(url)
-    }
-
-    private static func newFolder(in dir: URL?) {
-        guard let dir = directory(of: dir) else { return }
-        let url = uniqueURL(dir: dir, base: "新建文件夹", ext: nil)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
-        revealInFinder(url)
     }
 
     // MARK: - 文件管理
