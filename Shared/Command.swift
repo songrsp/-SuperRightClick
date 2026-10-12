@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// 所有右键动作的唯一标识。扩展用它发指令，主程序用它分发执行。
 /// 新增功能时：在这里加一个 case → 在 MenuBuilder 里加菜单项 → 在 CommandExecutor 里加处理分支。
@@ -114,36 +115,101 @@ struct FileClip: Codable {
 
 enum FileClipboard {
 
+    /// A private pasteboard type keeps the copy/cut intent alongside the file
+    /// URLs.  Finder's pasteboard has no public cut flag, so the App Group
+    /// record remains the durable fallback while this type enables normal
+    /// pasteboard interoperability with other clients.
+    private static let modePasteboardType = NSPasteboard.PasteboardType(
+        "com.team.superrightclick.file-clip-mode"
+    )
+
     private static var fileURL: URL? {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: AppConfig.appGroupID)?
             .appendingPathComponent("clipboard.json")
     }
 
-    /// 写入剪贴板（覆盖旧内容）。空路径不写。
+    /// Write both the shared clipboard record and the system pasteboard.
+    /// Empty selections are ignored so a failed command cannot erase a
+    /// previously usable clipboard.
     static func put(mode: FileClipMode, paths: [String]) {
-        guard let url = fileURL, !paths.isEmpty else { return }
-        let clip = FileClip(mode: mode, paths: paths, createdAt: Date())
-        do {
-            let data = try JSONEncoder.iso.encode(clip)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            NSLog("[SuperRightClick] 写文件剪贴板失败: \(error)")
+        let normalized = paths
+            .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+            .filter { !$0.isEmpty }
+        guard !normalized.isEmpty else { return }
+
+        let clip = FileClip(mode: mode, paths: normalized, createdAt: Date())
+        if let url = fileURL {
+            do {
+                let data = try JSONEncoder.iso.encode(clip)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                NSLog("[SuperRightClick] 写文件剪贴板失败: \(error)")
+            }
         }
+        writeSystemPasteboard(mode: mode, paths: normalized)
     }
 
     static func get() -> FileClip? {
+        // Prefer the system pasteboard.  This also lets the custom Paste Here
+        // command consume files copied by Finder or another pasteboard client.
+        if let clip = readSystemPasteboard() { return clip }
         guard let url = fileURL, let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder.iso.decode(FileClip.self, from: data)
     }
 
     static func clear() {
-        guard let url = fileURL else { return }
-        try? FileManager.default.removeItem(at: url)
+        clearStored()
+        // A successful cut must not remain available for a second move.
+        NSPasteboard.general.clearContents()
+    }
+
+    /// Forget only the App Group copy.  Text-only clipboard actions use this
+    /// to prevent a previous cut selection from resurfacing as Paste Here.
+    static func clearStored() {
+        if let url = fileURL { try? FileManager.default.removeItem(at: url) }
     }
 
     /// 当前待粘贴项数（菜单用来显示「粘贴 N 项」并决定是否出现该项）。
     static var count: Int { Self.get()?.paths.count ?? 0 }
+
+    private static func writeSystemPasteboard(mode: FileClipMode, paths: [String]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        let items: [NSPasteboardItem] = paths.map { path in
+            let item = NSPasteboardItem()
+            let url = URL(fileURLWithPath: path).standardizedFileURL
+            // fileURL is the interoperable representation used by Finder and
+            // other pasteboard clients.  A file promise is deliberately not
+            // faked with arbitrary data: promise destinations need a live
+            // NSFilePromiseProvider delegate, while these are existing local
+            // files and their URLs are immediately available.
+            _ = item.setString(url.absoluteString, forType: .fileURL)
+            _ = item.setString(mode.rawValue, forType: modePasteboardType)
+            return item
+        }
+        if !items.isEmpty && !pasteboard.writeObjects(items) {
+            NSLog("[SuperRightClick] 写系统文件剪贴板失败")
+        }
+    }
+
+    private static func readSystemPasteboard() -> FileClip? {
+        guard let items = NSPasteboard.general.pasteboardItems, !items.isEmpty else {
+            return nil
+        }
+        let paths = items.compactMap { item -> String? in
+            guard let raw = item.string(forType: .fileURL),
+                  let url = URL(string: raw), url.isFileURL else { return nil }
+            return url.standardizedFileURL.path
+        }
+        guard !paths.isEmpty else { return nil }
+        let rawMode = items.lazy
+            .compactMap { $0.string(forType: modePasteboardType) }
+            .first
+        let mode = rawMode.flatMap(FileClipMode.init(rawValue:)) ?? .copy
+        return FileClip(mode: mode, paths: paths, createdAt: Date())
+    }
 }
 
 /// 扩展后台唤醒主程序时写一个短暂标记。

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 
 /// 主程序里真正执行各类动作的地方。所有需要文件系统 / 子进程 / UI 的操作都在这里。
 @MainActor
@@ -106,17 +107,35 @@ enum CommandExecutor {
     }
 
     private static func copy(_ urls: [URL], to dest: URL) {
+        guard !urls.isEmpty else { return }
+        var failures: [(URL, Error)] = []
         for u in urls {
             let target = uniqueURL(dir: dest, base: u.deletingPathExtension().lastPathComponent, ext: u.pathExtension.isEmpty ? nil : u.pathExtension)
-            try? FileManager.default.copyItem(at: u, to: target)
+            do {
+                try FileManager.default.copyItem(at: u, to: target)
+            } catch {
+                failures.append((u, error))
+                Log.error("copy failed \(u.path): \(error.localizedDescription)")
+            }
         }
+        reportFileOperationFailures("复制失败", failures)
     }
 
     private static func move(_ urls: [URL], to dest: URL) {
+        guard !urls.isEmpty else { return }
+        var failures: [(URL, Error)] = []
         for u in urls {
-            let target = dest.appendingPathComponent(u.lastPathComponent)
-            try? FileManager.default.moveItem(at: u, to: target)
+            let target = uniqueURL(dir: dest,
+                                   base: u.deletingPathExtension().lastPathComponent,
+                                   ext: u.pathExtension.isEmpty ? nil : u.pathExtension)
+            do {
+                try moveItemAcrossVolumes(from: u, to: target)
+            } catch {
+                failures.append((u, error))
+                Log.error("move failed \(u.path): \(error.localizedDescription)")
+            }
         }
+        reportFileOperationFailures("移动失败", failures)
     }
 
     /// 粘贴：按文件剪贴板把源文件 move(剪切) / copy(复制) 进目标文件夹。
@@ -124,6 +143,7 @@ enum CommandExecutor {
     private static func paste(into dir: URL?) {
         guard let dir = directory(of: dir) else {
             Log.error("粘贴失败：目标文件夹无效")
+            Alerts.warn("无法粘贴", "目标文件夹无效。")
             return
         }
         guard let clip = FileClipboard.get(), !clip.paths.isEmpty else {
@@ -131,11 +151,23 @@ enum CommandExecutor {
             return
         }
 
+        guard FileManager.default.isWritableFile(atPath: dir.path) else {
+            let message = "没有写入权限：\(dir.path)"
+            Log.error("粘贴失败：\(message)")
+            Alerts.warn("无法粘贴", message)
+            return
+        }
+
         var done = 0, skipped = 0
+        var failures: [(URL, Error)] = []
         for p in clip.paths {
             let src = URL(fileURLWithPath: p)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 skipped += 1                       // 源已不存在（被移走/删除）
+                let error = NSError(domain: NSCocoaErrorDomain,
+                                    code: NSFileNoSuchFileError,
+                                    userInfo: [NSLocalizedDescriptionKey: "源文件不存在"])
+                failures.append((src, error))
                 continue
             }
             let target = uniqueURL(dir: dir,
@@ -143,19 +175,50 @@ enum CommandExecutor {
                                    ext: src.pathExtension.isEmpty ? nil : src.pathExtension)
             do {
                 switch clip.mode {
-                case .cut:  try FileManager.default.moveItem(at: src, to: target)
+                case .cut:  try moveItemAcrossVolumes(from: src, to: target)
                 case .copy: try FileManager.default.copyItem(at: src, to: target)
                 }
                 done += 1
             } catch {
                 skipped += 1
+                failures.append((src, error))
                 Log.error("粘贴失败 \(src.lastPathComponent): \(error.localizedDescription)")
             }
         }
 
-        // 剪切：成功搬完后清空剪贴板；复制：保留，可连续粘贴到多个位置。
-        if clip.mode == .cut { FileClipboard.clear() }
+        // 剪切：所有项目都成功搬完后清空剪贴板；部分失败时保留它们以便重试。
+        if clip.mode == .cut && failures.isEmpty { FileClipboard.clear() }
         Log.info("粘贴(\(clip.mode.rawValue))完成 \(done) 项，跳过 \(skipped) → \(dir.path)")
+        if !failures.isEmpty {
+            reportFileOperationFailures("粘贴部分失败", failures)
+        }
+    }
+
+    /// FileManager.moveItem can report EXDEV when source and destination are
+    /// on different volumes. Copy first, then trash the source so a failed
+    /// copy never turns a cut into data loss.
+    private static func moveItemAcrossVolumes(from source: URL, to destination: URL) throws {
+        do {
+            try FileManager.default.moveItem(at: source, to: destination)
+        } catch let error as NSError
+            where error.domain == NSPOSIXErrorDomain && error.code == Int(EXDEV) {
+            try FileManager.default.copyItem(at: source, to: destination)
+            do {
+                try FileManager.default.trashItem(at: source, resultingItemURL: nil)
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                throw error
+            }
+        }
+    }
+
+    private static func reportFileOperationFailures(_ title: String, _ failures: [(URL, Error)]) {
+        guard !failures.isEmpty else { return }
+        let details = failures.prefix(6).map { url, error in
+            "\(url.lastPathComponent)：\(error.localizedDescription)"
+        }.joined(separator: "\n")
+        let suffix = failures.count > 6 ? "\n还有 \(failures.count - 6) 项失败。" : ""
+        Alerts.warn(title, details + suffix)
     }
 
     // MARK: - 开发者
@@ -265,6 +328,8 @@ enum CommandExecutor {
 /// 剪贴板（主程序侧）
 enum Pasteboard {
     static func set(_ text: String) {
+        // A text-only copy supersedes any pending file cut/copy operation.
+        FileClipboard.clearStored()
         let pb = NSPasteboard.general
         pb.clearContents()
         let ok = pb.setString(text, forType: .string)

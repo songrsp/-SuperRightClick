@@ -98,6 +98,10 @@ final class FinderSyncController: FIFinderSync {
 /// 剪贴板小工具（扩展内可用）
 enum Clipboard {
     static func copy(_ text: String) {
+        // A text-only copy supersedes a previous file cut/copy selection.
+        // Keep the App Group record in sync with the system pasteboard so
+        // Paste Here does not offer stale files after copying a path/name.
+        FileClipboard.clearStored()
         let pb = NSPasteboard.general
         pb.clearContents()
         let ok = pb.setString(text, forType: .string)
