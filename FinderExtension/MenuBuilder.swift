@@ -40,6 +40,39 @@ enum MenuRegistry {
     }
 }
 
+/// Finder 菜单的声明式模型。
+///
+/// 先用模型描述“这个功能是否启用、显示什么、点击后执行什么”，再由
+/// `MenuBuilder` 统一转换为 `NSMenuItem`。这样偏好开关只影响模型层，
+/// 不会把 UI 配置字段混进 Shared/Command.swift 的动作协议。
+private indirect enum MenuModel {
+    case leaf(title: String, action: ActionID, arg: String?, enabled: Bool)
+    case group(title: String, children: [MenuModel], enabled: Bool)
+    case section(children: [MenuModel], enabled: Bool)
+
+    static func item(title: String, action: ActionID, arg: String? = nil,
+                    enabled: Bool = true) -> MenuModel {
+        .leaf(title: title, action: action, arg: arg, enabled: enabled)
+    }
+
+    static func submenu(title: String, children: [MenuModel],
+                       enabled: Bool = true) -> MenuModel {
+        .group(title: title, children: children, enabled: enabled)
+    }
+
+    static func flat(_ children: [MenuModel], enabled: Bool = true) -> MenuModel {
+        .section(children: children, enabled: enabled)
+    }
+
+    var isEnabled: Bool {
+        switch self {
+        case let .leaf(_, _, _, enabled), let .group(_, _, enabled),
+             let .section(_, enabled):
+            return enabled
+        }
+    }
+}
+
 /// 负责拼装仿 Windows 风格的右键菜单。
 /// - 菜单项是否出现，会按「当前选中内容」+「用户偏好开关(Pref)」动态决定。
 /// - 默认平铺进 Finder 原生右键；用户可在设置里改成收进「⚡️ 超级右键」子菜单。
@@ -71,110 +104,105 @@ enum MenuBuilder {
             dest = root
         }
 
-        func item(_ title: String, _ id: ActionID, arg: String? = nil) -> NSMenuItem {
-            let mi = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            mi.target = target
-
-            // 主载荷通道：tag → 登记处（跨进程一定能保住的 Int）。
-            let tag = MenuRegistry.register(MenuPayload(action: id, arg: arg))
-            mi.tag = tag
-
-            // 兼容 fallback：representedObject 仍照设，但回调里不再依赖它
-            // （Finder 复制菜单时大概率会丢，仅作冗余）。
-            var dict = ["action": id.rawValue]
-            if let arg = arg { dict["arg"] = arg }
-            mi.representedObject = dict
-
-            Log.debugFile("item build title=\(title) tag=\(tag) action=\(id.rawValue) arg=\(arg ?? "nil")")
-            return mi
-        }
-        func addSubmenu(_ title: String, _ items: [NSMenuItem]) {
-            guard !items.isEmpty else { return }
-            let head = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            let m = NSMenu()
-            items.forEach { m.addItem($0) }
-            head.submenu = m
-            dest.addItem(head)
-        }
-
-        // 排版说明：Finder Sync 注入的上下文菜单里,第三方 .separator() 不会渲染成
-        // 原生那种细分隔线,而是变成一整截突兀的空白。用户选择「紧凑平铺」,所以这里
-        // 六组功能直接连成一条连续列表,不插任何分隔符。
-
-        // —— 打开方式（含动态列出可打开选中文件的 App）——
-        if Pref.openWith {
-            var openItems = [
-                item("在此打开终端", .openInTerminal),
-                item("用 VS Code 打开", .openInVSCode),
-            ]
-            let apps = appsThatOpen(selected)
-            if !apps.isEmpty {
-                for appURL in apps {
-                    openItems.append(item(appURL.deletingPathExtension().lastPathComponent,
-                                          .openWith, arg: appURL.path))
-                }
-            }
-            addSubmenu("打开方式", openItems)
-        }
-
-        // —— 复制信息 ——
-        if Pref.copyInfo && hasSelection {
-            dest.addItem(item("复制路径", .copyPath))
-            dest.addItem(item("复制文件名", .copyName))
-            dest.addItem(item("复制所在目录", .copyDirPath))
-        }
-
-        // —— 新建 ——
-        if Pref.newItems {
-            addSubmenu("新建", [
-                item("文本文件 (.txt)", .newFileTxt),
-                item("Markdown (.md)", .newFileMarkdown),
-                item("文件夹", .newFolder),
-            ])
-        }
-
-        // —— 文件操作 ——
-        if Pref.fileOps {
-            // Windows 式 剪切 / 复制（需选中对象）
-            if hasSelection {
-                dest.addItem(item("剪切", .cutFiles))
-                dest.addItem(item("复制文件", .copyFiles))
-            }
-            // 粘贴：只在文件剪贴板有内容时出现；空白处右键(无选中)也能粘贴
-            let clipCount = FileClipboard.count
-            if clipCount > 0 {
-                dest.addItem(item("粘贴 \(clipCount) 项到此处", .pasteHere))
-            }
-            // 其余文件操作（需选中对象）
-            if hasSelection {
-                dest.addItem(item("复制到…", .copyToFolder))
-                dest.addItem(item("移动到…", .moveToFolder))
-                dest.addItem(item("压缩为 ZIP", .compress))
-                if hasArchive { dest.addItem(item("解压到此处", .decompress)) }
-                if selected.count > 1 { dest.addItem(item("批量重命名…", .batchRename)) }
-                dest.addItem(item("移到废纸篓", .moveToTrash))
-            }
-        }
-
-        // —— 开发者（哈希）——
-        if Pref.developer && hasSelection {
-            dest.addItem(item("复制 SHA256", .copyHashSHA256))
-            dest.addItem(item("复制 MD5", .copyHashMD5))
-        }
-
-        // —— 仿 Windows 常驻项 ——
-        if Pref.windows {
-            dest.addItem(item("显示/隐藏隐藏文件", .toggleHiddenFiles))
-            dest.addItem(item("刷新", .refreshFinder))
-            if hasSelection { dest.addItem(item("属性", .showProperties)) }
-        }
-
-        // —— 卸载（仅选中 .app 时出现）——
-        if Pref.uninstall && hasApp {
-            dest.addItem(item("彻底卸载此应用并清理残余…", .uninstallApp))
-        }
+        // 先生成启用状态的模型数组，再统一渲染。Finder 注入菜单时不插入
+        // 分隔符，避免第三方上下文菜单出现大块空白。
+        let models = makeModels(selected: selected,
+                                hasSelection: hasSelection,
+                                hasApp: hasApp,
+                                hasArchive: hasArchive)
+        render(models, into: dest, target: target, action: action)
 
         return root
+    }
+
+    private static func makeModels(selected: [URL], hasSelection: Bool,
+                                   hasApp: Bool, hasArchive: Bool) -> [MenuModel] {
+        var openItems: [MenuModel] = [
+            .item(title: "在此打开终端", action: .openInTerminal),
+            .item(title: "用 VS Code 打开", action: .openInVSCode),
+        ]
+        openItems += appsThatOpen(selected).map {
+            .item(title: $0.deletingPathExtension().lastPathComponent,
+                  action: .openWith, arg: $0.path)
+        }
+
+        var fileItems: [MenuModel] = []
+        if hasSelection {
+            fileItems += [
+                .item(title: "剪切", action: .cutFiles),
+                .item(title: "复制文件", action: .copyFiles),
+            ]
+        }
+        let clipCount = FileClipboard.count
+        if clipCount > 0 {
+            fileItems.append(.item(title: "粘贴 \(clipCount) 项到此处", action: .pasteHere))
+        }
+        if hasSelection {
+            fileItems += [
+                .item(title: "复制到…", action: .copyToFolder),
+                .item(title: "移动到…", action: .moveToFolder),
+                .item(title: "压缩为 ZIP", action: .compress),
+            ]
+            if hasArchive { fileItems.append(.item(title: "解压到此处", action: .decompress)) }
+            if selected.count > 1 { fileItems.append(.item(title: "批量重命名…", action: .batchRename)) }
+            fileItems.append(.item(title: "移到废纸篓", action: .moveToTrash))
+        }
+
+        return [
+            .submenu(title: "打开方式", children: openItems, enabled: Pref.openWith),
+            .flat([
+                .item(title: "复制路径", action: .copyPath),
+                .item(title: "复制文件名", action: .copyName),
+                .item(title: "复制所在目录", action: .copyDirPath),
+            ], enabled: Pref.copyInfo && hasSelection),
+            .submenu(title: "新建", children: [
+                .item(title: "文本文件 (.txt)", action: .newFileTxt),
+                .item(title: "Markdown (.md)", action: .newFileMarkdown),
+                .item(title: "文件夹", action: .newFolder),
+            ], enabled: Pref.newItems),
+            .flat(fileItems, enabled: Pref.fileOps),
+            .flat([
+                .item(title: "复制 SHA256", action: .copyHashSHA256),
+                .item(title: "复制 MD5", action: .copyHashMD5),
+            ], enabled: Pref.developer && hasSelection),
+            .flat([
+                .item(title: "显示/隐藏隐藏文件", action: .toggleHiddenFiles),
+                .item(title: "刷新", action: .refreshFinder),
+                .item(title: "属性", action: .showProperties, enabled: hasSelection),
+            ], enabled: Pref.windows),
+            .item(title: "彻底卸载此应用并清理残余…", action: .uninstallApp,
+                  enabled: Pref.uninstall && hasApp),
+        ]
+    }
+
+    private static func render(_ models: [MenuModel], into menu: NSMenu,
+                               target: AnyObject, action: Selector) {
+        for model in models where model.isEnabled {
+            switch model {
+            case let .leaf(title, id, arg, _):
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = target
+                let tag = MenuRegistry.register(MenuPayload(action: id, arg: arg))
+                item.tag = tag
+                var dict = ["action": id.rawValue]
+                if let arg = arg { dict["arg"] = arg }
+                item.representedObject = dict
+                Log.debugFile("item build title=\(title) tag=\(tag) action=\(id.rawValue) arg=\(arg ?? "nil")")
+                menu.addItem(item)
+
+            case let .group(title, children, _):
+                let visibleChildren = children.filter { $0.isEnabled }
+                guard !visibleChildren.isEmpty else { continue }
+                let head = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                let childMenu = NSMenu()
+                render(visibleChildren, into: childMenu, target: target, action: action)
+                head.submenu = childMenu
+                menu.addItem(head)
+
+            case let .section(children, _):
+                render(children, into: menu, target: target, action: action)
+            }
+        }
     }
 
     /// 查询能打开选中文件的 App（去重按名、限量 8 个）。多选时按第一个文件的类型。
