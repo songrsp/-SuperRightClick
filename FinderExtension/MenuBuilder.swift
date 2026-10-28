@@ -47,8 +47,9 @@ enum MenuRegistry {
 /// 不会把 UI 配置字段混进 Shared/Command.swift 的动作协议。
 private indirect enum MenuModel {
     case leaf(title: String, action: ActionID, arg: String?, iconName: String?, enabled: Bool)
-    case group(title: String, children: [MenuModel], enabled: Bool)
-    case section(children: [MenuModel], enabled: Bool)
+    /// `accent` 是这一组的图标颜色，向下传给没有自己颜色的子项。
+    case group(title: String, iconName: String?, children: [MenuModel], accent: NSColor?, enabled: Bool)
+    case section(children: [MenuModel], accent: NSColor?, enabled: Bool)
 
     static func item(title: String, action: ActionID, arg: String? = nil,
                     iconName: String? = nil,
@@ -56,19 +57,20 @@ private indirect enum MenuModel {
         .leaf(title: title, action: action, arg: arg, iconName: iconName, enabled: enabled)
     }
 
-    static func submenu(title: String, children: [MenuModel],
-                       enabled: Bool = true) -> MenuModel {
-        .group(title: title, children: children, enabled: enabled)
+    static func submenu(title: String, iconName: String? = nil, children: [MenuModel],
+                       accent: NSColor? = nil, enabled: Bool = true) -> MenuModel {
+        .group(title: title, iconName: iconName, children: children, accent: accent, enabled: enabled)
     }
 
-    static func flat(_ children: [MenuModel], enabled: Bool = true) -> MenuModel {
-        .section(children: children, enabled: enabled)
+    static func flat(_ children: [MenuModel], accent: NSColor? = nil,
+                     enabled: Bool = true) -> MenuModel {
+        .section(children: children, accent: accent, enabled: enabled)
     }
 
     var isEnabled: Bool {
         switch self {
-        case let .leaf(_, _, _, _, enabled), let .group(_, _, enabled),
-             let .section(_, enabled):
+        case let .leaf(_, _, _, _, enabled), let .group(_, _, _, _, enabled),
+             let .section(_, _, enabled):
             return enabled
         }
     }
@@ -149,39 +151,41 @@ enum MenuBuilder {
             fileItems.append(.item(title: "移到废纸篓", action: .moveToTrash))
         }
 
+        // 每个分组一种颜色：既和 Finder 原生的单色图标区分开，也方便一眼认出分组。
         return [
-            .submenu(title: "打开方式", children: openItems, enabled: Pref.openWith),
+            .submenu(title: "打开方式", iconName: "arrow.up.forward.app", children: openItems,
+                     accent: .systemBlue, enabled: Pref.openWith),
             .flat([
                 .item(title: "复制路径", action: .copyPath),
                 .item(title: "复制文件名", action: .copyName),
                 .item(title: "复制所在目录", action: .copyDirPath),
-            ], enabled: Pref.copyInfo && hasSelection),
-            .submenu(title: "新建", children: newFileModels(), enabled: Pref.newItems),
-            .flat(fileItems, enabled: Pref.fileOps),
+            ], accent: .systemTeal, enabled: Pref.copyInfo && hasSelection),
+            .submenu(title: "新建", iconName: "plus.square", children: newFileModels(),
+                     accent: .systemGreen, enabled: Pref.newItems),
+            .flat(fileItems, accent: .systemOrange, enabled: Pref.fileOps),
             .flat([
                 .item(title: "复制 SHA256", action: .copyHashSHA256),
                 .item(title: "复制 MD5", action: .copyHashMD5),
-            ], enabled: Pref.developer && hasSelection),
+            ], accent: .systemPurple, enabled: Pref.developer && hasSelection),
             .flat([
                 .item(title: "显示/隐藏隐藏文件", action: .toggleHiddenFiles),
                 .item(title: "刷新", action: .refreshFinder),
                 .item(title: "属性", action: .showProperties, enabled: hasSelection),
-            ], enabled: Pref.windows),
-            .item(title: "彻底卸载此应用并清理残余…", action: .uninstallApp,
-                  enabled: Pref.uninstall && hasApp),
+            ], accent: .systemIndigo, enabled: Pref.windows),
+            .flat([
+                .item(title: "彻底卸载此应用并清理残余…", action: .uninstallApp),
+            ], accent: .systemRed, enabled: Pref.uninstall && hasApp),
         ]
     }
 
-    private static func render(_ models: [MenuModel], into menu: NSMenu,
+    private static func render(_ models: [MenuModel], into menu: NSMenu, accent: NSColor? = nil,
                                target: AnyObject, action: Selector) {
         for model in models where model.isEnabled {
             switch model {
             case let .leaf(title, id, arg, iconName, _):
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = target
-                if let iconName = iconName {
-                    item.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
-                }
+                item.image = icon(for: id, arg: arg, iconName: iconName, accent: accent)
                 let tag = MenuRegistry.register(MenuPayload(action: id, arg: arg))
                 item.tag = tag
                 var dict = ["action": id.rawValue]
@@ -190,18 +194,63 @@ enum MenuBuilder {
                 Log.debugFile("item build title=\(title) tag=\(tag) action=\(id.rawValue) arg=\(arg ?? "nil")")
                 menu.addItem(item)
 
-            case let .group(title, children, _):
+            case let .group(title, iconName, children, groupAccent, _):
                 let visibleChildren = children.filter { $0.isEnabled }
                 guard !visibleChildren.isEmpty else { continue }
+                let color = groupAccent ?? accent
                 let head = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                if Pref.coloredIcons, let color = color {
+                    head.image = MenuIcons.symbol(iconName ?? "folder", color: color)
+                }
                 let childMenu = NSMenu()
-                render(visibleChildren, into: childMenu, target: target, action: action)
+                render(visibleChildren, into: childMenu, accent: color, target: target, action: action)
                 head.submenu = childMenu
                 menu.addItem(head)
 
-            case let .section(children, _):
-                render(children, into: menu, target: target, action: action)
+            case let .section(children, sectionAccent, _):
+                render(children, into: menu, accent: sectionAccent ?? accent,
+                       target: target, action: action)
             }
+        }
+    }
+
+    /// 菜单项图标：开启彩色图标时按分组颜色着色；关闭时只保留新建模板自带的单色图标。
+    private static func icon(for action: ActionID, arg: String?, iconName: String?,
+                             accent: NSColor?) -> NSImage? {
+        guard Pref.coloredIcons, let accent = accent else {
+            return iconName.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+        }
+        if action == .openWith, let appPath = arg, let image = MenuIcons.appIcon(atPath: appPath) {
+            return image
+        }
+        return MenuIcons.symbol(iconName ?? symbolName(for: action), color: accent)
+            ?? MenuIcons.symbol("circle.fill", color: accent)
+    }
+
+    private static func symbolName(for action: ActionID) -> String {
+        switch action {
+        case .copyPath:                          return "link"
+        case .copyName:                          return "textformat"
+        case .copyDirPath:                       return "folder"
+        case .newFileTxt, .newFileMarkdown,
+             .newFolder, .newFileTemplate:       return "doc.badge.plus"
+        case .moveToTrash:                       return "trash"
+        case .compress:                          return "archivebox"
+        case .decompress:                        return "shippingbox"
+        case .copyToFolder:                      return "folder.badge.plus"
+        case .moveToFolder:                      return "arrow.right.doc.on.clipboard"
+        case .batchRename:                       return "pencil"
+        case .cutFiles:                          return "scissors"
+        case .copyFiles:                         return "doc.on.doc"
+        case .pasteHere:                         return "doc.on.clipboard"
+        case .openInTerminal:                    return "terminal"
+        case .openInVSCode:                      return "chevron.left.forwardslash.chevron.right"
+        case .openWith:                          return "app"
+        case .copyHashSHA256, .copyHashMD5:      return "number"
+        case .toggleHiddenFiles:                 return "eye.slash"
+        case .refreshFinder:                     return "arrow.clockwise"
+        case .showProperties:                    return "info.circle"
+        case .uninstallApp:                      return "xmark.bin"
         }
     }
 

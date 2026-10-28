@@ -19,6 +19,10 @@ enum Pref {
         static let useSubmenu      = "ui.useSubmenu"   // 收进 ⚡️ 超级右键 子菜单 vs 平铺
         static let newFileAutoOpen = "newFile.autoOpen"    // 新建后用默认 App 打开
         static let newFileAutoReveal = "newFile.autoReveal" // 新建后在 Finder 中选中
+        static let coloredIcons    = "ui.coloredIcons"     // 菜单项带彩色图标，和 Finder 原生项区分
+        static let hotkeyCutPaste  = "hotkey.cutPaste"     // ⌘X 剪切 / ⌘V 粘贴(移动)
+        static let hotkeyDelete    = "hotkey.delete"       // Delete 键移到废纸篓
+        static let hotkeyEnterOpen = "hotkey.enterOpen"    // 回车打开 / F2 重命名
     }
 
     /// 读 bool，未设置过返回默认值（分组默认开，子菜单默认关=平铺）。
@@ -37,4 +41,10 @@ enum Pref {
     static var useSubmenu: Bool { bool(Key.useSubmenu,    default: false) }
     static var newFileAutoOpen: Bool { bool(Key.newFileAutoOpen, default: false) }
     static var newFileAutoReveal: Bool { bool(Key.newFileAutoReveal, default: true) }
+    static var coloredIcons: Bool { bool(Key.coloredIcons, default: true) }
+
+    // Finder 快捷键（FinderHotkeys 用）。回车改为打开会改变 Mac 习惯，默认关。
+    static var hotkeyCutPaste:  Bool { bool(Key.hotkeyCutPaste,  default: true) }
+    static var hotkeyDelete:    Bool { bool(Key.hotkeyDelete,    default: true) }
+    static var hotkeyEnterOpen: Bool { bool(Key.hotkeyEnterOpen, default: false) }
 }

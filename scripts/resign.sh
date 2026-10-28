@@ -61,7 +61,8 @@ BUILT=$(echo "$HOME"/Library/Developer/Xcode/DerivedData/SuperRightClick-*/Build
 # 先退出旧版本，再替换安装
 osascript -e 'tell application "SuperRightClick" to quit' >/dev/null 2>&1 || true
 sleep 1
-rm -rf "$APP"
+# 旧版本移到废纸篓（可找回），不永久删除
+osascript -e "tell application \"Finder\" to delete (POSIX file \"$APP\" as alias)" >/dev/null 2>&1 || mv "$APP" "$HOME/.Trash/SuperRightClick-$(date +%s).app"
 cp -R "$BUILT" "$APP" || { log "FAIL: 拷贝到 /Applications"; exit 1; }
 open "$APP" >/dev/null 2>&1 || true
 log "OK: 重签完成，已安装到 $APP"

@@ -112,6 +112,9 @@ struct FileClip: Codable {
     let mode: FileClipMode
     let paths: [String]
     let createdAt: Date
+    /// 写入记录时系统剪贴板的 changeCount。Finder 原生 ⌘C 写的剪贴板里没有我们的模式标记，
+    /// 靠它判断「当前剪贴板是否还是那次 ⌘X 剪切的内容」。
+    var changeCount: Int? = nil
 }
 
 enum FileClipboard {
@@ -139,22 +142,43 @@ enum FileClipboard {
             .filter { !$0.isEmpty }
         guard !normalized.isEmpty else { return }
 
-        let clip = FileClip(mode: mode, paths: normalized, createdAt: Date())
-        if let url = fileURL {
-            do {
-                let data = try JSONEncoder.iso.encode(clip)
-                try data.write(to: url, options: .atomic)
-            } catch {
-                NSLog("[SuperRightClick] 写文件剪贴板失败: \(error)")
-            }
-        }
         writeSystemPasteboard(mode: mode, paths: normalized)
+        store(FileClip(mode: mode, paths: normalized, createdAt: Date(),
+                       changeCount: NSPasteboard.general.changeCount))
     }
+
+    /// Finder 已用原生 ⌘C 把文件写上系统剪贴板（⌘X 快捷键走这条路），这里只把这份内容
+    /// 记成「剪切」。剪贴板之后一旦被改写（再次 ⌘C 等），changeCount 对不上，自动回到复制语义。
+    static func markSystemPasteboardAsCut() {
+        guard let clip = readSystemPasteboard() else { return }
+        store(FileClip(mode: .cut, paths: clip.paths, createdAt: Date(),
+                       changeCount: NSPasteboard.general.changeCount))
+    }
+
+    /// 系统剪贴板上是不是一份待粘贴的「剪切」文件（⌘V 是否要改成移动）。
+    static var isPendingCut: Bool { readSystemPasteboard()?.mode == .cut }
 
     static func get() -> FileClip? {
         // Prefer the system pasteboard.  This also lets the custom Paste Here
         // command consume files copied by Finder or another pasteboard client.
         if let clip = readSystemPasteboard() { return clip }
+        // 记录只在系统剪贴板没被改写过时有效：用户在别处复制了文字等，旧的文件剪贴板就作废，
+        // 和 Windows 一样「剪贴板只有一份」，也避免误把很早以前剪切的文件移走。
+        guard let clip = stored(), clip.changeCount == NSPasteboard.general.changeCount else { return nil }
+        return clip
+    }
+
+    private static func store(_ clip: FileClip) {
+        guard let url = fileURL else { return }
+        do {
+            let data = try JSONEncoder.iso.encode(clip)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            NSLog("[SuperRightClick] 写文件剪贴板失败: \(error)")
+        }
+    }
+
+    private static func stored() -> FileClip? {
         guard let url = fileURL, let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder.iso.decode(FileClip.self, from: data)
     }
@@ -208,8 +232,10 @@ enum FileClipboard {
         let rawMode = items.lazy
             .compactMap { $0.string(forType: modePasteboardType) }
             .first
-        let mode = rawMode.flatMap(FileClipMode.init(rawValue:)) ?? .copy
-        return FileClip(mode: mode, paths: paths, createdAt: Date())
+        let changeCount = NSPasteboard.general.changeCount
+        let markedCut = stored().map { $0.mode == .cut && $0.changeCount == changeCount } ?? false
+        let mode = rawMode.flatMap(FileClipMode.init(rawValue:)) ?? (markedCut ? .cut : .copy)
+        return FileClip(mode: mode, paths: paths, createdAt: Date(), changeCount: changeCount)
     }
 }
 

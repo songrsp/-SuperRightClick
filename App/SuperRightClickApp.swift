@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if launchedForBackgroundCommand {
             closeSettingsWindowsSoon()
         }
+        // Finder 里的 Windows 式快捷键；未授予辅助功能权限时会在后台等待授权。
+        FinderHotkeys.shared.start()
         // 0.5s 轮询信箱。也可改用 FSEvents 监听目录，这里用定时器最直观、最稳。
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in

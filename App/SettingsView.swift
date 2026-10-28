@@ -16,6 +16,11 @@ struct SettingsView: View {
     @AppStorage(Pref.Key.useSubmenu,     store: Pref.store) private var useSubmenu   = false
     @AppStorage(Pref.Key.newFileAutoOpen, store: Pref.store) private var newFileAutoOpen = false
     @AppStorage(Pref.Key.newFileAutoReveal, store: Pref.store) private var newFileAutoReveal = true
+    @AppStorage(Pref.Key.coloredIcons,    store: Pref.store) private var coloredIcons    = true
+    @AppStorage(Pref.Key.hotkeyCutPaste,  store: Pref.store) private var hotkeyCutPaste  = true
+    @AppStorage(Pref.Key.hotkeyDelete,    store: Pref.store) private var hotkeyDelete    = true
+    @AppStorage(Pref.Key.hotkeyEnterOpen, store: Pref.store) private var hotkeyEnterOpen = false
+    @State private var accessibilityTrusted = FinderHotkeys.isTrusted
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -69,7 +74,27 @@ struct SettingsView: View {
                     }
                 }
 
+                stepCard(
+                    n: 4,
+                    title: "授予辅助功能权限（Finder 快捷键）",
+                    desc: "⌘X 剪切、Delete 删除等快捷键需要此权限。打开「系统设置 → 隐私与安全性 → 辅助功能」，把本程序加进去并打开。授权后无需重启即生效。",
+                    status: accessibilityTrusted ? "已授权" : "未授权",
+                    ok: accessibilityTrusted
+                ) {
+                    Button("请求授权") {
+                        FinderHotkeys.requestAccess()
+                    }
+                    Button("打开辅助功能设置") {
+                        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                        NSWorkspace.shared.open(url)
+                    }
+                    Button("刷新状态") {
+                        accessibilityTrusted = FinderHotkeys.isTrusted
+                    }
+                }
+
                 togglesCard
+                hotkeysCard
                 featureList
                 aboutCard
             }
@@ -101,6 +126,22 @@ struct SettingsView: View {
             Toggle("新建后在 Finder 中选中", isOn: $newFileAutoReveal)
             Divider().padding(.vertical, 4)
             Toggle("收进「⚡️ 超级右键」子菜单（关=平铺到 Finder 菜单）", isOn: $useSubmenu)
+            Toggle("菜单项显示彩色图标（和 Finder 原生菜单区分）", isOn: $coloredIcons)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var hotkeysCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Finder 快捷键（仿 Windows）").font(.headline)
+            Text("只在 Finder 浏览文件时生效；重命名、搜索框里打字时保持系统原样。需要第 4 步的辅助功能权限，且本程序在后台运行。")
+                .font(.caption).foregroundColor(.secondary)
+            Toggle("⌘X 剪切 → ⌘V 粘贴时移动（⌘C 复制保持不变）", isOn: $hotkeyCutPaste)
+            Toggle("Delete 键（⌫ / ⌦）移到废纸篓", isOn: $hotkeyDelete)
+            Toggle("回车打开、F2 重命名（会改变 Mac 回车重命名的习惯）", isOn: $hotkeyEnterOpen)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -159,6 +200,7 @@ struct SettingsView: View {
             • 在此打开终端 / 用 VS Code 打开 / 复制 SHA256 · MD5
             • 显示隐藏文件 / 刷新 Finder / 属性
             • 彻底卸载 .app 并扫描清理残余
+            • Finder 快捷键：⌘X 剪切 / ⌘V 粘贴、Delete 删除、回车打开、F2 重命名
             """)
             .font(.callout).foregroundColor(.secondary)
         }
